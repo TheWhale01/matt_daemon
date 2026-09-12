@@ -10,6 +10,7 @@ int main(void) {
         MattDaemon daemon;
 
         daemon.init();
+        daemon.daemonize();
         daemon.run();
     }
     catch (MattDaemonException const &e) {

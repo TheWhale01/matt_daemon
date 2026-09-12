@@ -9,7 +9,7 @@ class MattDaemon {
         ~MattDaemon(void);
 
         void init(void);
-        void daemonize(void) const;
+        void daemonize(void);
         void run(void);
 
     private:
