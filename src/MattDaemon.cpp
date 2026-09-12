@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <filesystem>
+#include <sys/file.h>
 #include "MattDaemon.hpp"
 #include "Tintin_reporter.hpp"
 #include "exceptions/RunWithNonRootUserException.hpp"
@@ -16,13 +17,21 @@ MattDaemon::MattDaemon(void) {
     }
 }
 
-MattDaemon::~MattDaemon(void) {}
+MattDaemon::~MattDaemon(void) {
+    close(_lockfile_fd);
+}
 
 void MattDaemon::init(void) {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
-    int lockfile_fd = open(LOCKFILE_PATH, O_RDWR | O_CREAT, 0644);
-    if (lockfile_fd < 0)
-        throw UnableToOpenFile("Can't open", LOCKFILE_PATH);
+    _lockfile_fd = open(LOCKFILE_PATH, O_RDWR | O_CREAT, 0644);
+    if (_lockfile_fd < 0 || flock(_lockfile_fd, LOCK_EX | LOCK_NB) == -1)
+        throw UnableToOpenFile("Could not open: ", LOCKFILE_PATH);
     _logger.print_log("Daemon successfully initialized !");
+}
+
+void MattDaemon::daemonize(void) const {}
+
+void MattDaemon::run(void) {
+    while (true);
 }

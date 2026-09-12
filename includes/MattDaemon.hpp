@@ -9,9 +9,11 @@ class MattDaemon {
         ~MattDaemon(void);
 
         void init(void);
+        void daemonize(void) const;
+        void run(void);
 
     private:
-        int _logfile_fd;
+        int _lockfile_fd;
         std::vector<int> _clients;
         Tintin_reporter _logger;
 };

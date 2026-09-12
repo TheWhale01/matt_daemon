@@ -2,6 +2,7 @@
 #include "Tintin_reporter.hpp"
 #include "exceptions/MattDaemonException.hpp"
 #include <cstdlib>
+#include <iostream>
 #include <unistd.h>
 
 int main(void) {
@@ -9,12 +10,10 @@ int main(void) {
         MattDaemon daemon;
 
         daemon.init();
+        daemon.run();
     }
     catch (MattDaemonException const &e) {
-        Tintin_reporter logger;
-
-        logger.print_log(e.what(), STDERR_FILENO);
-        return EXIT_FAILURE;
+        std::cerr << e.what() << std::endl;
     }
     return EXIT_SUCCESS;
 }
