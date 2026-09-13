@@ -14,6 +14,7 @@ class MattDaemon {
 
     private:
         int _lockfile_fd;
+        const std::string _pid_filepath = "./Matt_daemon.pid";
         std::vector<int> _clients;
         Tintin_reporter _logger;
 };

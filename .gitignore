@@ -1,6 +1,6 @@
 obj/
-.direnv/
 Matt_daemon
+*.pid
 .cache/
 compile_commands.json
 vgcore.*

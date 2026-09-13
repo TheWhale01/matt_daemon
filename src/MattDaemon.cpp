@@ -1,5 +1,8 @@
+#include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
+#include <string>
+#include <sys/types.h>
 #include <unistd.h>
 #include <filesystem>
 #include <sys/file.h>
@@ -21,6 +24,7 @@ MattDaemon::MattDaemon(void) {
 
 MattDaemon::~MattDaemon(void) {
     close(_lockfile_fd);
+    int _ = remove(_pid_filepath.c_str());
 }
 
 void MattDaemon::init(void) {
@@ -29,7 +33,7 @@ void MattDaemon::init(void) {
     _lockfile_fd = open(LOCKFILE_PATH, O_RDWR | O_CREAT, 0644);
     if (_lockfile_fd < 0 || flock(_lockfile_fd, LOCK_EX | LOCK_NB) == -1)
         throw UnableToOpenFile("Could not open: ", LOCKFILE_PATH);
-    _logger.print_log("Process successfully initialized !");
+    _logger.print_log("Process successfully initialized !", LOG_LEVEL::INFO);
 }
 
 void MattDaemon::daemonize(void) {
@@ -46,7 +50,15 @@ void MattDaemon::daemonize(void) {
         throw FailedToDaemonize("Could not call second fork()");
     if (second_child != 0)
         exit(EXIT_SUCCESS);
-    _logger.print_log("Process successfully daemonized");
+    _logger.print_log("Process successfully daemonized", LOG_LEVEL::INFO);
+    pid_t pid = getpid();
+    FILE *pid_fp = std::fopen(_pid_filepath.c_str(), "w");
+    if (!pid_fp) {
+        _logger.print_log("Could not store pid in " + _pid_filepath + " file. Continuing daemon initialization.", LOG_LEVEL::WARNING);
+        return;
+    }
+    fprintf(pid_fp, "%d", pid);
+    fclose(pid_fp);
 }
 
 void MattDaemon::run(void) {

@@ -1,5 +1,4 @@
 #include "MattDaemon.hpp"
-#include "Tintin_reporter.hpp"
 #include "exceptions/MattDaemonException.hpp"
 #include <cstdlib>
 #include <iostream>
