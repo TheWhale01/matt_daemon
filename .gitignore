@@ -4,3 +4,4 @@ Matt_daemon
 .cache/
 compile_commands.json
 vgcore.*
+*.pdf
