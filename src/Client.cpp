@@ -6,15 +6,20 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "Client.hpp"
-#include "MattDaemon.hpp"
 #include "exceptions/FailedToCreateSocketException.hpp"
 
-Client::Client(int server_fd): _addr_len(sizeof(_addr)) {
+Client::Client(int server_fd) {
+    std::memset(&_addr, 0, sizeof(_addr));
+    _addr_len = sizeof(_addr);
     _pollfd.fd = accept(server_fd, reinterpret_cast<sockaddr*>(&_addr), &_addr_len);
     if (_pollfd.fd < 0)
         throw FailedToCreateSocketException("Could not get client fd.");
     _pollfd.events = POLLIN;
     _pollfd.revents = 0;
+}
+
+Client::Client(Client &&rhs) noexcept : _pollfd(rhs._pollfd), _addr(rhs._addr), _addr_len(rhs._addr_len) {
+    rhs._pollfd.fd = -1;
 }
 
 Client::Client(int server_fd, sockaddr_in addr): _addr(addr), _addr_len(sizeof(addr)) {
@@ -24,7 +29,20 @@ Client::Client(int server_fd, sockaddr_in addr): _addr(addr), _addr_len(sizeof(a
 }
 
 Client::~Client(void) {
-    close(_pollfd.fd);
+    if (_pollfd.fd >= 0)
+        close(_pollfd.fd);
+}
+
+Client &Client::operator=(Client &&rhs) noexcept {
+    if (this == &rhs)
+        return *this;
+    _addr = rhs._addr;
+    _addr_len = rhs._addr_len;
+    _pollfd = rhs._pollfd;
+    if (_pollfd.fd >= 0)
+        close(_pollfd.fd);
+    rhs._pollfd.fd = -1;
+    return *this;
 }
 
 const t_pollfd &Client::get_pollfd(void) const {

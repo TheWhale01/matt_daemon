@@ -1,4 +1,5 @@
 #include <ctime>
+#include <fcntl.h>
 #include <filesystem>
 #include <iomanip>
 #include <ostream>
@@ -9,7 +10,9 @@
 #include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
-Tintin_reporter::Tintin_reporter(void) {
+Tintin_reporter::Tintin_reporter(void) {}
+
+void Tintin_reporter::init(void) {
     try {
         std::filesystem::create_directories(std::filesystem::path(LOGFILE_PATH).parent_path().string());
     }
@@ -19,10 +22,11 @@ Tintin_reporter::Tintin_reporter(void) {
     _s_logfile.open(LOGFILE_PATH);
     if (!_s_logfile.is_open())
         throw UnableToOpenFileException("Can't open: ", LOGFILE_PATH);
-}
+};
 
 Tintin_reporter::~Tintin_reporter(void) {
-    _s_logfile.close();
+    if (_s_logfile.is_open())
+        _s_logfile.close();
 }
 
 std::string Tintin_reporter::_get_logformat_str(LOG_LEVEL level) const {
@@ -62,5 +66,6 @@ void Tintin_reporter::print_log(std::string const &msg, int fd, LOG_LEVEL level)
     std::string format = _get_logformat_str(level);
 
     write(fd, format.c_str(), format.length());
-    write(fd, (msg + "\n").c_str(), msg.length());
+    write(fd, msg.c_str(), msg.length());
+    write(fd, "\n", 1);
 }

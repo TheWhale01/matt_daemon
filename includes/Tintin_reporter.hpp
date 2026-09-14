@@ -16,6 +16,7 @@ class Tintin_reporter {
         ~Tintin_reporter(void);
         Tintin_reporter(const Tintin_reporter&) = delete;
 
+        void init(void);
         void print_log(std::string const &msg, LOG_LEVEL level);
         void print_log(std::string const &msg, int fd, LOG_LEVEL level);
 

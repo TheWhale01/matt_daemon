@@ -9,6 +9,8 @@ class Client {
     public:
         Client(int server_fd);
         Client(int server_fd, sockaddr_in addr);
+        Client(const Client &rhs) = delete;
+        Client(Client &&rhs) noexcept;
         ~Client(void);
 
         const t_pollfd &get_pollfd(void) const;
@@ -16,6 +18,9 @@ class Client {
         const socklen_t &get_socklen(void) const;
         std::string get_str_ip(void) const;
         static std::string get_str_ip(sockaddr_in addr);
+
+        Client &operator=(const Client &rhs) = delete;
+        Client &operator=(Client &&rhs) noexcept;
 
     private:
         t_pollfd _pollfd;

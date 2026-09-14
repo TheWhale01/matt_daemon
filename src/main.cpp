@@ -8,7 +8,6 @@ int main(void) {
     try {
         MattDaemon daemon;
 
-        daemon.init();
         daemon.run();
     }
     catch (MattDaemonException const &e) {

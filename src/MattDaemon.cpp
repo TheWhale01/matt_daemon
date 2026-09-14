@@ -24,7 +24,11 @@
 #include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
-MattDaemon::MattDaemon(void): _lockfile_fd(-1), _server_fd(-1) {
+MattDaemon::MattDaemon(void): _lockfile_fd(-1) {
+    if (geteuid() != 0)
+        throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
+    _lock_file();
+    _logger.init();
     try {
         std::filesystem::create_directories(std::filesystem::path(LOCKFILE_PATH).parent_path().string());
     }
@@ -37,28 +41,20 @@ MattDaemon::MattDaemon(void): _lockfile_fd(-1), _server_fd(-1) {
     catch (const std::filesystem::filesystem_error &e) {
         _logger.print_log("Could not create path: " + _pid_filepath + " Will not be able to store daemon pid.", LOG_LEVEL::WARNING);
     }
-}
-
-MattDaemon::~MattDaemon(void) {
-    close(_lockfile_fd);
-    for (size_t i = 0; i < _clients.size(); i++)
-        close(_clients[i].get_pollfd().fd);
-    int _ = remove(_pid_filepath.c_str());
-}
-
-void MattDaemon::init(void) {
-    _lock_file();
     _daemonize();
     _init_socket();
 }
 
+MattDaemon::~MattDaemon(void) {
+    close(_lockfile_fd);
+    remove(_pid_filepath.c_str());
+}
+
 void MattDaemon::_lock_file(void) {
-    if (geteuid() != 0)
-        throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
     _lockfile_fd = open(LOCKFILE_PATH, O_RDWR | O_CREAT, 0644);
     if (_lockfile_fd < 0 || flock(_lockfile_fd, LOCK_EX | LOCK_NB) == -1)
         throw UnableToOpenFileException("Could not open: ", LOCKFILE_PATH);
-    _logger.print_log("Process successfully initialized !", LOG_LEVEL::INFO);
+    _logger.print_log("Process successfully initialized !", STDOUT_FILENO, LOG_LEVEL::INFO);
 }
 
 void MattDaemon::_init_socket(void) {
@@ -79,13 +75,17 @@ void MattDaemon::_init_socket(void) {
        	close(_server_fd);
        	throw FailedToCreateSocketException("Failed to listen on server socket.", _logger, LOG_LEVEL::CRITICAL);
     }
-    _clients.push_back(Client(_server_fd, addr));
+    Client server_client(_server_fd, addr);
+    _pollfds.push_back(server_client.get_pollfd());
+    _clients.push_back(std::move(server_client));
     _logger.print_log("Server started at " + Client::get_str_ip(addr), LOG_LEVEL::INFO);
 }
 
 void MattDaemon::_daemonize(void) {
+    pid_t current_pid;
     pid_t first_child;
     pid_t second_child;
+    FILE *current_pid_fp;
 
     first_child = fork();
     if (first_child == -1)
@@ -100,14 +100,14 @@ void MattDaemon::_daemonize(void) {
     if (second_child != 0)
         exit(EXIT_SUCCESS);
     _logger.print_log("Process successfully daemonized", LOG_LEVEL::INFO);
-    pid_t pid = getpid();
-    FILE *pid_fp = std::fopen(_pid_filepath.c_str(), "w");
-    if (!pid_fp) {
+    current_pid = getpid();
+    current_pid_fp = std::fopen(_pid_filepath.c_str(), "w");
+    if (!current_pid_fp) {
         _logger.print_log("Could not store pid in " + _pid_filepath + " file. Continuing daemon initialization.", LOG_LEVEL::WARNING);
         return;
     }
-    fprintf(pid_fp, "%d", pid);
-    fclose(pid_fp);
+    fprintf(current_pid_fp, "%d", current_pid);
+    fclose(current_pid_fp);
     if (chdir("/") < 0)
         throw FailedToDaemonizeException("Could not change home directory of current process.", _logger, LOG_LEVEL::CRITICAL);
     umask(0);
@@ -121,21 +121,16 @@ void MattDaemon::_daemonize(void) {
 
 void MattDaemon::run(void) {
     while (true) {
-        std::vector<pollfd> pollfds;
-
-        pollfds.reserve(_clients.size());
-        for (size_t i = 0; i < _clients.size(); i++)
-            pollfds.push_back(_clients[i].get_pollfd());
-        int res = poll(pollfds.data(), _clients.size(), -1);
+        int res = poll(_pollfds.data(), _pollfds.size(), -1);
         if (res < 0) {
             if (errno == EINTR)
                 continue;
             throw FailedToPollException("Could not poll. Stopping daemon.", _logger, LOG_LEVEL::CRITICAL);
         }
-        for (size_t i = 0; i < _clients.size(); i++) {
-            if (!(pollfds[i].revents & POLLIN))
+        for (size_t i = 0; i < _pollfds.size(); i++) {
+            if (!(_pollfds[i].revents & POLLIN))
                 continue;
-            if (pollfds[i].fd == _server_fd)
+            if (_pollfds[i].fd == _server_fd)
                 _handle_new_connection();
             else
                 _handle_client(i);
@@ -149,24 +144,36 @@ void MattDaemon::_handle_client(int client_index) {
     std::memset(buffer, 0, RD_BUFFER_SIZE);
     ssize_t bytes = recv(_clients[client_index].get_pollfd().fd, buffer, RD_BUFFER_SIZE - 1, 0);
     if (bytes <= 0) {
+        _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " disconnected", LOG_LEVEL::INFO);
+        _pollfds.erase(_pollfds.begin() + client_index);
         _clients.erase(_clients.begin() + client_index);
         return ;
     }
+    while (bytes > 0 && (buffer[bytes - 1] == '\n' || buffer[bytes - 1] == '\r')) {
+        buffer[bytes - 1] = '\0';
+        bytes--;
+    }
+    _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " sent `" + std::string(buffer) + "`", LOG_LEVEL::INFO);
 }
 
 void MattDaemon::_handle_new_connection(void) {
+    std::string msg;
+
     try {
         Client client(_server_fd);
 
         if (_clients.size() >= NB_CLIENTS + 1) {
-            const std::string msg = "Client tried to connect from: " + client.get_str_ip() + ". Max client number reached. Closing connection.";
+            msg = "Client tried to connect from: " + client.get_str_ip() + ". Max client number reached. Closing connection.";
 
             _logger.print_log(msg, client.get_pollfd().fd, LOG_LEVEL::ERROR);
             _logger.print_log(msg, LOG_LEVEL::ERROR);
             return ;
         }
-        _clients.push_back(client);
-        _logger.print_log("New client connected from: " + client.get_str_ip(), LOG_LEVEL::INFO);
+        msg = "New client connected from: " + client.get_str_ip();
+        _logger.print_log(msg, LOG_LEVEL::INFO);
+        _logger.print_log(msg, client.get_pollfd().fd, LOG_LEVEL::INFO);
+        _pollfds.push_back(client.get_pollfd());
+        _clients.push_back(std::move(client));
     }
     catch (FailedToCreateSocketException const &e) {
         _logger.print_log("Client failed to connect.", LOG_LEVEL::ERROR);
