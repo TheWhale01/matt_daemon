@@ -3,14 +3,15 @@
 #include <fcntl.h>
 #include <string>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <filesystem>
 #include <sys/file.h>
 #include "MattDaemon.hpp"
 #include "Tintin_reporter.hpp"
-#include "exceptions/FailedToDeamonize.hpp"
+#include "exceptions/FailedToDeamonizeException.hpp"
 #include "exceptions/RunWithNonRootUserException.hpp"
-#include "exceptions/UnableToOpenFile.hpp"
+#include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
 MattDaemon::MattDaemon(void) {
@@ -18,7 +19,7 @@ MattDaemon::MattDaemon(void) {
         std::filesystem::create_directories(std::filesystem::path(LOCKFILE_PATH).parent_path().string());
     }
     catch (const std::filesystem::filesystem_error &e) {
-        throw UnableToOpenFile("Can't open: ", LOCKFILE_PATH);
+        throw UnableToOpenFileException("Can't open: ", LOCKFILE_PATH);
     }
 }
 
@@ -32,7 +33,7 @@ void MattDaemon::init(void) {
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
     _lockfile_fd = open(LOCKFILE_PATH, O_RDWR | O_CREAT, 0644);
     if (_lockfile_fd < 0 || flock(_lockfile_fd, LOCK_EX | LOCK_NB) == -1)
-        throw UnableToOpenFile("Could not open: ", LOCKFILE_PATH);
+        throw UnableToOpenFileException("Could not open: ", LOCKFILE_PATH);
     _logger.print_log("Process successfully initialized !", LOG_LEVEL::INFO);
 }
 
@@ -42,12 +43,14 @@ void MattDaemon::daemonize(void) {
 
     first_child = fork();
     if (first_child == -1)
-        throw FailedToDaemonize("Could not call first fork()");
+        throw FailedToDaemonizeException("Could not call first fork()");
     if (first_child != 0)
         exit(EXIT_SUCCESS);
+    if (setsid() < 0)
+        throw FailedToDaemonizeException("Could not detach process to session");
     second_child = fork();
     if (second_child == -1)
-        throw FailedToDaemonize("Could not call second fork()");
+        throw FailedToDaemonizeException("Could not call second fork()");
     if (second_child != 0)
         exit(EXIT_SUCCESS);
     _logger.print_log("Process successfully daemonized", LOG_LEVEL::INFO);
@@ -59,6 +62,17 @@ void MattDaemon::daemonize(void) {
     }
     fprintf(pid_fp, "%d", pid);
     fclose(pid_fp);
+    if (chdir("/") < 0)
+        throw FailedToDaemonizeException("Could not change home directory of current process.");
+    umask(0);
+    for (int fd = 0; fd < sysconf(_SC_OPEN_MAX); fd++)
+        close(fd);
+    int new_stdio = open("/dev/null", O_RDWR);
+    dup2(new_stdio, STDIN_FILENO);
+    dup2(new_stdio, STDOUT_FILENO);
+    dup2(new_stdio, STDERR_FILENO);
+    if (new_stdio > STDERR_FILENO)
+        close(new_stdio);
 }
 
 void MattDaemon::run(void) {

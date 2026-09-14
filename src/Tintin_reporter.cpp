@@ -6,7 +6,7 @@
 #include <string>
 #include <unistd.h>
 #include "Tintin_reporter.hpp"
-#include "exceptions/UnableToOpenFile.hpp"
+#include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
 Tintin_reporter::Tintin_reporter(void) {
@@ -14,11 +14,11 @@ Tintin_reporter::Tintin_reporter(void) {
         std::filesystem::create_directories(std::filesystem::path(LOGFILE_PATH).parent_path().string());
     }
     catch (const std::filesystem::filesystem_error &e) {
-        throw UnableToOpenFile("Can't open: ", LOGFILE_PATH);
+        throw UnableToOpenFileException("Can't open: ", LOGFILE_PATH);
     }
     _s_logfile.open(LOGFILE_PATH);
     if (!_s_logfile.is_open())
-        throw UnableToOpenFile("Can't open: ", LOGFILE_PATH);
+        throw UnableToOpenFileException("Can't open: ", LOGFILE_PATH);
 }
 
 Tintin_reporter::~Tintin_reporter(void) {
