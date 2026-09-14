@@ -3,7 +3,7 @@ NAME= Matt_daemon
 OBJ_DIR= obj/
 SRC_DIR= src/
 INCLUDES= includes/
-SRCS= $(addprefix $(SRC_DIR), main.cpp MattDaemon.cpp Tintin_reporter.cpp)
+SRCS= $(addprefix $(SRC_DIR), main.cpp MattDaemon.cpp Tintin_reporter.cpp Client.cpp)
 OBJS= $(patsubst $(SRC_DIR)%.cpp, $(OBJ_DIR)%.o, $(SRCS))
 CXXFLAGS= -Wall -Wextra -Werror -I $(INCLUDES) -g3
 
