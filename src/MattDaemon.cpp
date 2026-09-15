@@ -24,17 +24,17 @@
 #include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
-MattDaemon::MattDaemon(void): _lockfile_fd(-1) {
+MattDaemon::MattDaemon(void): _lockfile_fd(-1), _running(true) {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
-    _lock_file();
-    _logger.init();
     try {
         std::filesystem::create_directories(std::filesystem::path(LOCKFILE_PATH).parent_path().string());
     }
     catch (const std::filesystem::filesystem_error &e) {
         throw UnableToOpenFileException("Can't open: ", LOCKFILE_PATH);
     }
+    _lock_file();
+    _logger.init();
     try {
         std::filesystem::create_directories(std::filesystem::path(_pid_filepath).parent_path().string());
     }
@@ -120,7 +120,7 @@ void MattDaemon::_daemonize(void) {
 }
 
 void MattDaemon::run(void) {
-    while (true) {
+    while (_running) {
         int res = poll(_pollfds.data(), _pollfds.size(), -1);
         if (res < 0) {
             if (errno == EINTR)
@@ -133,12 +133,18 @@ void MattDaemon::run(void) {
             if (_pollfds[i].fd == _server_fd)
                 _handle_new_connection();
             else
-                _handle_client(i);
+                _running = _handle_client(i);
+        }
+    }
+    for (size_t i = 0; i < _pollfds.size(); i++) {
+        if (_pollfds[i].fd != _server_fd) {
+            _logger.print_log("Server shutdown.", _pollfds[i].fd, LOG_LEVEL::INFO);
+            _logger.print_log("Server shutdown.", LOG_LEVEL::INFO);
         }
     }
 }
 
-void MattDaemon::_handle_client(int client_index) {
+bool MattDaemon::_handle_client(int client_index) {
     char buffer[RD_BUFFER_SIZE];
 
     std::memset(buffer, 0, RD_BUFFER_SIZE);
@@ -147,13 +153,15 @@ void MattDaemon::_handle_client(int client_index) {
         _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " disconnected", LOG_LEVEL::INFO);
         _pollfds.erase(_pollfds.begin() + client_index);
         _clients.erase(_clients.begin() + client_index);
-        return ;
+        return false;
     }
     while (bytes > 0 && (buffer[bytes - 1] == '\n' || buffer[bytes - 1] == '\r')) {
         buffer[bytes - 1] = '\0';
         bytes--;
     }
-    _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " sent `" + std::string(buffer) + "`", LOG_LEVEL::INFO);
+    std::string msg(buffer);
+    _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " sent `" + msg + "`", LOG_LEVEL::INFO);
+    return !(msg.size() == 4 && msg == "quit");
 }
 
 void MattDaemon::_handle_new_connection(void) {

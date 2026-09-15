@@ -14,8 +14,9 @@ class MattDaemon {
         void run(void);
 
     private:
-        int _lockfile_fd;
         int _server_fd;
+        int _lockfile_fd;
+        bool _running;
     	static const int _server_port = 4242;
         const std::string _pid_filepath = "/var/run/matt_daemon/matt_daemon.pid";
         std::vector<Client> _clients;
@@ -26,5 +27,7 @@ class MattDaemon {
         void _lock_file(void);
         void _init_socket(void);
         void _handle_new_connection(void);
-        void _handle_client(int client_index);
+        bool _handle_client(int client_index);
+        void _signal_init(void);
+        void _signal_handler(int signum);
 };
