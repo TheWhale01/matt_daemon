@@ -27,7 +27,7 @@
 #include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
-MattDaemon::MattDaemon(void): _lockfile_fd(-1) {
+MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1) {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
     try {
@@ -165,7 +165,8 @@ void MattDaemon::run(void) {
             _logger.print_log("Server shutdown.", _pollfds[i].fd, LOG_LEVEL::INFO);
         }
     }
-    _logger.print_log("Server shutdown.", LOG_LEVEL::INFO);
+    if (_server_fd != -1)
+        _logger.print_log("Server shutdown.", LOG_LEVEL::INFO);
 }
 
 bool MattDaemon::_handle_client(int client_index) {
@@ -216,9 +217,9 @@ void MattDaemon::_handle_signal(void) {
     signalfd_siginfo siginfo;
 
     ssize_t size = read(_signal_fd, &siginfo, sizeof(siginfo));
-    if (size != sizeof(siginfo))
-        throw;
-    _logger.print_log("Signal: " + std::to_string(siginfo.ssi_signo) + " received !", LOG_LEVEL::INFO);
-    if (siginfo.ssi_signo == SIGKILL)
-        _running = false;
+    if (size != sizeof(siginfo)) {
+        _logger.print_log("Could not read signal.", LOG_LEVEL::ERROR);
+        return ;
+    }
+   _logger.print_log("Signal: " + std::to_string(siginfo.ssi_signo) + " received !", LOG_LEVEL::INFO);
 }
