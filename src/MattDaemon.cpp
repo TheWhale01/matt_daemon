@@ -1,4 +1,5 @@
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/signalfd.h>
 #include <unistd.h>
 #include <filesystem>
 #include <sys/file.h>
@@ -19,12 +21,13 @@
 #include "Tintin_reporter.hpp"
 #include "exceptions/FailedToCreateSocketException.hpp"
 #include "exceptions/FailedToDeamonizeException.hpp"
+#include "exceptions/FailedToInitSignalsException.hpp"
 #include "exceptions/FailedToPollException.hpp"
 #include "exceptions/RunWithNonRootUserException.hpp"
 #include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
-MattDaemon::MattDaemon(void): _lockfile_fd(-1), _running(true) {
+MattDaemon::MattDaemon(void): _lockfile_fd(-1) {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
     try {
@@ -41,13 +44,31 @@ MattDaemon::MattDaemon(void): _lockfile_fd(-1), _running(true) {
     catch (const std::filesystem::filesystem_error &e) {
         _logger.print_log("Could not create path: " + _pid_filepath + " Will not be able to store daemon pid.", LOG_LEVEL::WARNING);
     }
-    _daemonize();
+    _running = _daemonize();
+    if (!_running)
+        return ;
     _init_socket();
+    _init_signal();
 }
 
 MattDaemon::~MattDaemon(void) {
     close(_lockfile_fd);
     remove(_pid_filepath.c_str());
+}
+
+void MattDaemon::_init_signal(void) {
+    sigset_t mask;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &mask, nullptr) < 0)
+        throw FailedToInitSignalsException("Could not initialize signals.");
+    _signal_fd = signalfd(-1, &mask, SFD_CLOEXEC);
+    if (_signal_fd < 0)
+        throw FailedToInitSignalsException("Could not initialize signals.");
+    Client client(_signal_fd, {});
+    _pollfds.push_back(client.get_pollfd());
+    _clients.push_back(std::move(client));
 }
 
 void MattDaemon::_lock_file(void) {
@@ -81,7 +102,7 @@ void MattDaemon::_init_socket(void) {
     _logger.print_log("Server started at " + Client::get_str_ip(addr), LOG_LEVEL::INFO);
 }
 
-void MattDaemon::_daemonize(void) {
+bool MattDaemon::_daemonize(void) {
     pid_t current_pid;
     pid_t first_child;
     pid_t second_child;
@@ -91,20 +112,20 @@ void MattDaemon::_daemonize(void) {
     if (first_child == -1)
         throw FailedToDaemonizeException("Could not call first fork()", _logger, LOG_LEVEL::CRITICAL);
     if (first_child != 0)
-        exit(EXIT_SUCCESS);
+        return false;
     if (setsid() < 0)
         throw FailedToDaemonizeException("Could not detach process to session", _logger, LOG_LEVEL::CRITICAL);
     second_child = fork();
     if (second_child == -1)
         throw FailedToDaemonizeException("Could not call second fork()", _logger, LOG_LEVEL::CRITICAL);
     if (second_child != 0)
-        exit(EXIT_SUCCESS);
+        return false;
     _logger.print_log("Process successfully daemonized", LOG_LEVEL::INFO);
     current_pid = getpid();
     current_pid_fp = std::fopen(_pid_filepath.c_str(), "w");
     if (!current_pid_fp) {
         _logger.print_log("Could not store pid in " + _pid_filepath + " file. Continuing daemon initialization.", LOG_LEVEL::WARNING);
-        return;
+        return true;
     }
     fprintf(current_pid_fp, "%d", current_pid);
     fclose(current_pid_fp);
@@ -117,6 +138,7 @@ void MattDaemon::_daemonize(void) {
     dup2(new_stdio, STDERR_FILENO);
     if (new_stdio > STDERR_FILENO)
         close(new_stdio);
+    return true;
 }
 
 void MattDaemon::run(void) {
@@ -132,6 +154,8 @@ void MattDaemon::run(void) {
                 continue;
             if (_pollfds[i].fd == _server_fd)
                 _handle_new_connection();
+            else if (_pollfds[i].fd == _signal_fd)
+                _handle_signal();
             else
                 _running = _handle_client(i);
         }
@@ -139,9 +163,9 @@ void MattDaemon::run(void) {
     for (size_t i = 0; i < _pollfds.size(); i++) {
         if (_pollfds[i].fd != _server_fd) {
             _logger.print_log("Server shutdown.", _pollfds[i].fd, LOG_LEVEL::INFO);
-            _logger.print_log("Server shutdown.", LOG_LEVEL::INFO);
         }
     }
+    _logger.print_log("Server shutdown.", LOG_LEVEL::INFO);
 }
 
 bool MattDaemon::_handle_client(int client_index) {
@@ -153,7 +177,7 @@ bool MattDaemon::_handle_client(int client_index) {
         _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " disconnected", LOG_LEVEL::INFO);
         _pollfds.erase(_pollfds.begin() + client_index);
         _clients.erase(_clients.begin() + client_index);
-        return false;
+        return true;
     }
     while (bytes > 0 && (buffer[bytes - 1] == '\n' || buffer[bytes - 1] == '\r')) {
         buffer[bytes - 1] = '\0';
@@ -186,4 +210,15 @@ void MattDaemon::_handle_new_connection(void) {
     catch (FailedToCreateSocketException const &e) {
         _logger.print_log("Client failed to connect.", LOG_LEVEL::ERROR);
     }
+}
+
+void MattDaemon::_handle_signal(void) {
+    signalfd_siginfo siginfo;
+
+    ssize_t size = read(_signal_fd, &siginfo, sizeof(siginfo));
+    if (size != sizeof(siginfo))
+        throw;
+    _logger.print_log("Signal: " + std::to_string(siginfo.ssi_signo) + " received !", LOG_LEVEL::INFO);
+    if (siginfo.ssi_signo == SIGKILL)
+        _running = false;
 }
