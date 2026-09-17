@@ -7,8 +7,7 @@ INCLUDES = includes
 SRCS = $(addprefix $(SRC_DIR)/, main.cpp MattDaemon.cpp Tintin_reporter.cpp Client.cpp)
 OBJS = $(patsubst $(SRC_DIR)/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
 
-CXXFLAGS = -Wall -Wextra -Werror -I$(INCLUDES) -g3 -MMD -MP
-LDFLAGS  =
+CXXFLAGS = -Wall -Wextra -Werror -I$(INCLUDES) -g3 -MMD -MP -std=c++17
 
 all: $(NAME)
 

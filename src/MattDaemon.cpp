@@ -27,7 +27,7 @@
 #include "exceptions/UnableToOpenFileException.hpp"
 #include "utils.hpp"
 
-MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1) {
+MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _running(true) {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
     try {
@@ -45,6 +45,7 @@ MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1) {
         _logger.print_log("Could not create path: " + _pid_filepath + " Will not be able to store daemon pid.", LOG_LEVEL::WARNING);
     }
     _running = _daemonize();
+    _create_pid_file();
     if (!_running)
         return ;
     _init_socket();
@@ -61,6 +62,7 @@ void MattDaemon::_init_signal(void) {
 
     sigemptyset(&mask);
     sigaddset(&mask, SIGTERM);
+    sigaddset(&mask, SIGINT);
     if (sigprocmask(SIG_BLOCK, &mask, nullptr) < 0)
         throw FailedToInitSignalsException("Could not initialize signals.");
     _signal_fd = signalfd(-1, &mask, SFD_CLOEXEC);
@@ -69,6 +71,18 @@ void MattDaemon::_init_signal(void) {
     Client client(_signal_fd, {});
     _pollfds.push_back(client.get_pollfd());
     _clients.push_back(std::move(client));
+}
+
+void MattDaemon::_create_pid_file(void) {
+    FILE *current_pid_fp;
+    pid_t current_pid;
+
+    current_pid = getpid();
+    current_pid_fp = std::fopen(_pid_filepath.c_str(), "w");
+    if (!current_pid_fp)
+        _logger.print_log("Could not store pid in " + _pid_filepath + " file. Continuing daemon initialization.", LOG_LEVEL::WARNING);
+    fprintf(current_pid_fp, "%d", current_pid);
+    fclose(current_pid_fp);
 }
 
 void MattDaemon::_lock_file(void) {
@@ -103,10 +117,8 @@ void MattDaemon::_init_socket(void) {
 }
 
 bool MattDaemon::_daemonize(void) {
-    pid_t current_pid;
     pid_t first_child;
     pid_t second_child;
-    FILE *current_pid_fp;
 
     first_child = fork();
     if (first_child == -1)
@@ -121,14 +133,6 @@ bool MattDaemon::_daemonize(void) {
     if (second_child != 0)
         return false;
     _logger.print_log("Process successfully daemonized", LOG_LEVEL::INFO);
-    current_pid = getpid();
-    current_pid_fp = std::fopen(_pid_filepath.c_str(), "w");
-    if (!current_pid_fp) {
-        _logger.print_log("Could not store pid in " + _pid_filepath + " file. Continuing daemon initialization.", LOG_LEVEL::WARNING);
-        return true;
-    }
-    fprintf(current_pid_fp, "%d", current_pid);
-    fclose(current_pid_fp);
     if (chdir("/") < 0)
         throw FailedToDaemonizeException("Could not change home directory of current process.", _logger, LOG_LEVEL::CRITICAL);
     umask(0);
@@ -138,6 +142,7 @@ bool MattDaemon::_daemonize(void) {
     dup2(new_stdio, STDERR_FILENO);
     if (new_stdio > STDERR_FILENO)
         close(new_stdio);
+    _daemonized = true;
     return true;
 }
 
@@ -160,11 +165,9 @@ void MattDaemon::run(void) {
                 _running = _handle_client(i);
         }
     }
-    for (size_t i = 0; i < _pollfds.size(); i++) {
-        if (_pollfds[i].fd != _server_fd) {
+    for (size_t i = 0; i < _pollfds.size(); i++)
+        if (_pollfds[i].fd != _server_fd)
             _logger.print_log("Server shutdown.", _pollfds[i].fd, LOG_LEVEL::INFO);
-        }
-    }
     if (_server_fd != -1)
         _logger.print_log("Server shutdown.", LOG_LEVEL::INFO);
 }
@@ -195,9 +198,8 @@ void MattDaemon::_handle_new_connection(void) {
     try {
         Client client(_server_fd);
 
-        if (_clients.size() >= NB_CLIENTS + 1) {
+        if (_clients.size() >= NB_CLIENTS + 2) {
             msg = "Client tried to connect from: " + client.get_str_ip() + ". Max client number reached. Closing connection.";
-
             _logger.print_log(msg, client.get_pollfd().fd, LOG_LEVEL::ERROR);
             _logger.print_log(msg, LOG_LEVEL::ERROR);
             return ;
@@ -214,12 +216,14 @@ void MattDaemon::_handle_new_connection(void) {
 }
 
 void MattDaemon::_handle_signal(void) {
+    ssize_t bytes;
     signalfd_siginfo siginfo;
 
-    ssize_t size = read(_signal_fd, &siginfo, sizeof(siginfo));
-    if (size != sizeof(siginfo)) {
+    bytes = read(_signal_fd, &siginfo, sizeof(siginfo));
+    if (bytes != sizeof(siginfo)) {
         _logger.print_log("Could not read signal.", LOG_LEVEL::ERROR);
         return ;
     }
    _logger.print_log("Signal: " + std::to_string(siginfo.ssi_signo) + " received !", LOG_LEVEL::INFO);
+   _running = false;
 }
