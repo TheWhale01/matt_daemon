@@ -8,9 +8,12 @@
 class MattDaemon {
     public:
         MattDaemon(void);
+        MattDaemon(const MattDaemon &rhs) = delete;
         ~MattDaemon(void);
 
         void run(void);
+
+        MattDaemon &operator=(const MattDaemon &rhs) = delete;
 
     private:
         int _server_fd;

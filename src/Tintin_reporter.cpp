@@ -34,7 +34,7 @@ std::string Tintin_reporter::_get_logformat_str(LOG_LEVEL level) const {
     time_t time = std::time(nullptr);
     struct tm datetime = *std::localtime(&time);
 
-    oss << std::put_time(&datetime, "%d / %m / %Y - %H : %M : %S") << " [";
+    oss << std::put_time(&datetime, "[%d/%m/%Y-%H:%M:%S]") << " [";
     switch (level) {
         case LOG_LEVEL::DEBUG:
             oss << "DEBUG";

@@ -32,20 +32,8 @@ volatile sig_atomic_t g_signum = -1;
 MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _exit_child(false), _logger("/var/log/matt_daemon/matt_daemon.log") {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
-    try {
-        std::filesystem::create_directories(std::filesystem::path(_lockfile_path).parent_path().string());
-    }
-    catch (const std::filesystem::filesystem_error &e) {
-        throw UnableToOpenFileException("Can't open: ", _lockfile_path);
-    }
-    _lock_file();
     _logger.init();
-    try {
-        std::filesystem::create_directories(std::filesystem::path(_pid_filepath).parent_path().string());
-    }
-    catch (const std::filesystem::filesystem_error &e) {
-        _logger.print_log("Could not create path: " + _pid_filepath + " Will not be able to store daemon pid.", LOG_LEVEL::WARNING);
-    }
+    _lock_file();
     _exit_child = _daemonize();
     if (_exit_child)
         return ;
@@ -55,6 +43,8 @@ MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _exit_child(fals
 }
 
 MattDaemon::~MattDaemon(void) {
+    if (_exit_child)
+        return ;
     if (close(_lockfile_fd) >= 0)
         remove(_lockfile_path.c_str());
     remove(_pid_filepath.c_str());
@@ -66,7 +56,7 @@ void MattDaemon::_init_signal(void) {
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    for (size_t i = 0; i < 32; i++) {
+    for (size_t i = 1; i < 32; i++) {
         if (i == SIGKILL || i == SIGSTOP)
             continue;
         sigaction(i, &sa, nullptr);
@@ -77,19 +67,34 @@ void MattDaemon::_create_pid_file(void) {
     FILE *current_pid_fp;
     pid_t current_pid;
 
+    try {
+        std::filesystem::create_directories(std::filesystem::path(_pid_filepath).parent_path().string());
+    }
+    catch (const std::filesystem::filesystem_error &e) {
+        _logger.print_log("Could not create path: " + _pid_filepath + " Will not be able to store daemon pid.", LOG_LEVEL::WARNING);
+        return ;
+    }
     current_pid = getpid();
     current_pid_fp = std::fopen(_pid_filepath.c_str(), "w");
-    if (!current_pid_fp)
+    if (!current_pid_fp) {
         _logger.print_log("Could not store pid in " + _pid_filepath + " file. Continuing daemon initialization.", LOG_LEVEL::WARNING);
+        return ;
+    }
     fprintf(current_pid_fp, "%d", current_pid);
     fclose(current_pid_fp);
 }
 
 void MattDaemon::_lock_file(void) {
+    try {
+        std::filesystem::create_directories(std::filesystem::path(_lockfile_path).parent_path().string());
+    }
+    catch (const std::filesystem::filesystem_error &e) {
+        throw UnableToOpenFileException("Can't open: ", _lockfile_path);
+    }
     _lockfile_fd = open(_lockfile_path.c_str(), O_RDWR | O_CREAT, 0644);
     if (_lockfile_fd < 0 || flock(_lockfile_fd, LOCK_EX | LOCK_NB) == -1)
-        throw UnableToOpenFileException("Could not open: ", _lockfile_path);
-    _logger.print_log("Process successfully initialized !", STDOUT_FILENO, LOG_LEVEL::INFO);
+        throw UnableToOpenFileException("Can't open: ", _lockfile_path);
+    _logger.print_log("Process successfully initialized !", LOG_LEVEL::INFO);
 }
 
 void MattDaemon::_init_socket(void) {
@@ -135,7 +140,7 @@ bool MattDaemon::_daemonize(void) {
         throw FailedToDaemonizeException("Could not call second fork()", _logger, LOG_LEVEL::CRITICAL);
     if (second_child != 0)
         return true;
-    _logger.print_log("Process successfully daemonized", LOG_LEVEL::INFO);
+    _logger.print_log("Process successfully daemonized", STDOUT_FILENO, LOG_LEVEL::INFO);
     if (chdir("/") < 0)
         throw FailedToDaemonizeException("Could not change home directory of current process.", _logger, LOG_LEVEL::CRITICAL);
     umask(0);
