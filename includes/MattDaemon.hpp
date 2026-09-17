@@ -19,6 +19,7 @@ class MattDaemon {
         int _server_fd;
         int _lockfile_fd;
         bool _exit_child;
+        bool _quit;
     	static const int _server_port = 4242;
         static const int _buffer_read_size = 1024;
         static const int _nb_clients = 4;

@@ -29,7 +29,7 @@
 
 volatile sig_atomic_t g_signum = -1;
 
-MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _exit_child(false), _logger("/var/log/matt_daemon/matt_daemon.log") {
+MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _exit_child(false), _quit(false), _logger("/var/log/matt_daemon/matt_daemon.log") {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
     _logger.init();
@@ -56,7 +56,7 @@ void MattDaemon::_init_signal(void) {
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    for (size_t i = 1; i < 32; i++) {
+    for (size_t i = 1; i < NSIG; i++) {
         if (i == SIGKILL || i == SIGSTOP)
             continue;
         sigaction(i, &sa, nullptr);
@@ -154,7 +154,7 @@ bool MattDaemon::_daemonize(void) {
 }
 
 void MattDaemon::run(void) {
-    while (g_signum == -1 && !_exit_child) {
+    while (g_signum == -1 && !_exit_child && !_quit) {
         int res = poll(_pollfds.data(), _pollfds.size(), -1);
         if (res < 0) {
             if (errno == EINTR)
@@ -171,7 +171,7 @@ void MattDaemon::run(void) {
         }
     }
     if (g_signum != -1)
-        _logger.print_log("Signal " + std::to_string(g_signum) + " received.", LOG_LEVEL::INFO);
+        _logger.print_log("Signal " + std::string(sigabbrev_np(g_signum)) + " received.", LOG_LEVEL::INFO);
     for (size_t i = 0; i < _pollfds.size(); i++)
         if (_pollfds[i].fd != _server_fd)
             _logger.print_log("Server shutdown.", _pollfds[i].fd, LOG_LEVEL::INFO);
@@ -196,7 +196,7 @@ void MattDaemon::_handle_client(int client_index) {
     }
     std::string msg(buffer);
     _logger.print_log("Client at " + _clients[client_index].get_str_ip() + " sent `" + msg + "`", LOG_LEVEL::INFO);
-    _exit_child = (msg.size() == 4 && msg == "quit");
+    _quit = (msg.size() == 4 && msg == "quit");
 }
 
 void MattDaemon::_handle_new_connection(void) {
