@@ -1,6 +1,7 @@
 #include <ctime>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <ostream>
 #include <sstream>
@@ -8,26 +9,25 @@
 #include <unistd.h>
 #include "Tintin_reporter.hpp"
 #include "exceptions/UnableToOpenFileException.hpp"
-#include "utils.hpp"
 
-Tintin_reporter::Tintin_reporter(void) {}
-
-void Tintin_reporter::init(void) {
-    try {
-        std::filesystem::create_directories(std::filesystem::path(LOGFILE_PATH).parent_path().string());
-    }
-    catch (const std::filesystem::filesystem_error &e) {
-        throw UnableToOpenFileException("Can't open: ", LOGFILE_PATH);
-    }
-    _s_logfile.open(LOGFILE_PATH);
-    if (!_s_logfile.is_open())
-        throw UnableToOpenFileException("Can't open: ", LOGFILE_PATH);
-};
+Tintin_reporter::Tintin_reporter(std::string const &logfile_path): _logfile_path(logfile_path) {}
 
 Tintin_reporter::~Tintin_reporter(void) {
     if (_s_logfile.is_open())
         _s_logfile.close();
 }
+
+void Tintin_reporter::init(void) {
+    try {
+        std::filesystem::create_directories(std::filesystem::path(_logfile_path).parent_path().string());
+    }
+    catch (const std::filesystem::filesystem_error &e) {
+        throw UnableToOpenFileException("Can't open: ", _logfile_path);
+    }
+    _s_logfile.open(_logfile_path);
+    if (!_s_logfile.is_open())
+        throw UnableToOpenFileException("Can't open: ", _logfile_path);
+};
 
 std::string Tintin_reporter::_get_logformat_str(LOG_LEVEL level) const {
     std::ostringstream oss;

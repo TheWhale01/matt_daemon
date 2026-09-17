@@ -29,18 +29,22 @@ Client::Client(int server_fd, sockaddr_in addr): _addr(addr), _addr_len(sizeof(a
 }
 
 Client::~Client(void) {
-    if (_pollfd.fd >= 0)
+    if (_pollfd.fd >= 0) {
+        shutdown(_pollfd.fd, SHUT_RDWR);
         close(_pollfd.fd);
+    }
 }
 
 Client &Client::operator=(Client &&rhs) noexcept {
     if (this == &rhs)
         return *this;
+    if (_pollfd.fd >= 0) {
+        shutdown(_pollfd.fd, SHUT_RDWR);
+        close(_pollfd.fd);
+    }
     _addr = rhs._addr;
     _addr_len = rhs._addr_len;
     _pollfd = rhs._pollfd;
-    if (_pollfd.fd >= 0)
-        close(_pollfd.fd);
     rhs._pollfd.fd = -1;
     return *this;
 }
