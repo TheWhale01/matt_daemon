@@ -13,6 +13,7 @@ enum class LOG_LEVEL {
 class Tintin_reporter {
     public:
         Tintin_reporter(void) = delete;
+        Tintin_reporter(Tintin_reporter &&rhs) = delete;
         Tintin_reporter(std::string const &logfile_path);
         Tintin_reporter(const Tintin_reporter&) = delete;
         ~Tintin_reporter(void);
@@ -22,6 +23,7 @@ class Tintin_reporter {
         void print_log(std::string const &msg, int fd, LOG_LEVEL level);
 
         Tintin_reporter& operator=(const Tintin_reporter&) = delete;
+        Tintin_reporter& operator=(Tintin_reporter &&rhs) = delete;
 
     private:
         std::ofstream _s_logfile;
