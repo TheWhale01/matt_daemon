@@ -29,11 +29,11 @@
 
 volatile sig_atomic_t g_signum = -1;
 
-MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _exit_child(false), _quit(false), _logger(_lockfile_path) {
+MattDaemon::MattDaemon(void): _server_fd(-1), _lockfile_fd(-1), _exit_child(false), _quit(false), _logger("/var/log/matt_daemon/matt_daemon.log") {
     if (geteuid() != 0)
         throw RunWithNonRootUserException("Could not initialize deamon. Ensure it's running as root.");
-    _logger.init();
     _lock_file();
+    _logger.init();
     _exit_child = _daemonize();
     if (_exit_child)
         return ;
